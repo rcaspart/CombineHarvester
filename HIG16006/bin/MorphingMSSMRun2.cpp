@@ -8,6 +8,7 @@
 #include "boost/algorithm/string/predicate.hpp"
 #include "boost/program_options.hpp"
 #include "boost/lexical_cast.hpp"
+#include "boost/regex.hpp"
 #include "CombineHarvester/CombineTools/interface/CombineHarvester.h"
 #include "CombineHarvester/CombineTools/interface/Observation.h"
 #include "CombineHarvester/CombineTools/interface/Process.h"
@@ -35,6 +36,7 @@ int main(int argc, char** argv) {
   string postfix="";
   bool auto_rebin = false;
   bool manual_rebin = false;
+  int control_region = 0;
   po::variables_map vm;
   po::options_description config("configuration");
   config.add_options()
@@ -44,7 +46,8 @@ int main(int argc, char** argv) {
     ("auto_rebin", po::value<bool>(&auto_rebin)->default_value(false))
     ("manual_rebin", po::value<bool>(&manual_rebin)->default_value(false))
     ("output_folder", po::value<string>(&output_folder)->default_value("mssm_run2"))
-    ("SM125,h", po::value<string>(&SM125)->default_value(SM125));
+    ("SM125,h", po::value<string>(&SM125)->default_value(SM125))
+    ("control_region", po::value<int>(&control_region)->default_value(0));
   po::store(po::command_line_parser(argc, argv).options(config).run(), vm);
   po::notify(vm);
   
@@ -111,7 +114,24 @@ int main(int argc, char** argv) {
     {8, "mt_nobtag"},
     {9, "mt_btag"}
     };
- 
+
+  if (control_region > 0){
+      // for each channel use the categories >= 10 for the control regions
+      // the control regions are ordered in triples (10,11,12),(13,14,15)...
+      for (auto chn:chns){
+          // for em do nothing
+          if ( chn == "em") continue;
+          Categories queue;
+          int binid = 10;
+          for (auto cat:cats[chn+"_13TeV"]){
+            queue.push_back(make_pair(binid,cat.second+"_wjetscr"));
+            queue.push_back(make_pair(binid+1,cat.second+"_qcdcr"));
+            queue.push_back(make_pair(binid+2,cat.second+"_wjetscr_ss"));
+            binid += 3;
+          }
+          cats[chn+"_13TeV"].insert(cats[chn+"_13TeV"].end(),queue.begin(),queue.end());
+      }
+  }
 
   vector<string> masses = {"90","100","110","120","130","140","160","180", "250", "300", "450", "500", "600", "700", "900","1000","1200","1500","1600","1800","2000","2600","2900","3200"}; //Not all mass points available for fall15
   //vector<string> masses = {"90","100","110","120","130","140","160","180", "200", "250", "300", "350", "400", "450", "500", "600", "700", "800", "900","1000","1200","1400","1500","1600","1800","2000","2300","2600","2900","3200"};
@@ -135,9 +155,16 @@ int main(int argc, char** argv) {
     cb.AddProcesses(masses, {"htt"}, {"13TeV"}, {chn}, signal_types["ggH"], cats[chn+"_13TeV"], true);
     cb.AddProcesses(masses, {"htt"}, {"13TeV"}, {chn}, signal_types["bbH"], cats[chn+"_13TeV"], true);
     }
+  if (control_region > 0){
+      // filter QCD in W+jets control regions
+      // filter signal processes in control regions
+      cb.FilterAll([](ch::Object const* obj) {
+              return (((obj->bin().find("wjetscr") != std::string::npos) && (obj->process() == "QCD")) || (boost::regex_search(obj->bin(),boost::regex{"(wjets|qcd)cr"}) && obj->signal()));
+              });
+  }
 
 
-  ch::AddMSSMRun2Systematics(cb);
+  ch::AddMSSMRun2Systematics(cb,control_region);
   //! [part7]
   for (string chn:chns){
     cb.cp().channel({chn}).backgrounds().ExtractShapes(
@@ -182,7 +209,9 @@ int main(int argc, char** argv) {
     .SetAddThreshold(0.)
     .SetMergeThreshold(0.4)
     .SetFixNorm(true);
-  bbb.MergeAndAdd(cb.cp().process({"ZTT", "QCD", "W", "ZJ", "ZL", "TT", "VV", "Ztt", "ttbar", "EWK", "Fakes", "ZMM", "TTJ", "WJets", "Dibosons"}), cb); 
+  bbb.MergeAndAdd(cb.cp().process({"ZTT", "QCD", "W", "ZJ", "ZL", "TT", "VV", "Ztt", "ttbar", "EWK", "Fakes", "ZMM", "TTJ", "WJets", "Dibosons"}).FilterAll([](ch::Object const* obj) {
+              return (boost::regex_search(obj->bin(),boost::regex{"(wjets|qcd)cr"}));
+              }), cb);
   cout << " done\n";
 
   //Switch JES over to lnN:

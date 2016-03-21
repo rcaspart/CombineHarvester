@@ -16,8 +16,12 @@ using ch::syst::process;
 using ch::JoinStr;
 
 
-void AddMSSMRun2Systematics(CombineHarvester & cb) {
+void AddMSSMRun2Systematics(CombineHarvester & cb, int control_region = 0) {
   CombineHarvester src = cb.cp();
+  if (control_region == 1){
+    //limit to only the btag and nobtag categories
+    src.bin_id({8,9});
+  }
 
   auto signal = Set2Vec(src.cp().signals().SetFromProcs(
       std::mem_fn(&Process::process)));
@@ -138,14 +142,9 @@ void AddMSSMRun2Systematics(CombineHarvester & cb) {
  src.cp().process({"QCD"}).channel({"et"}).AddSyst(cb,
       "CMS_htt_et_QCD_13TeV","lnN",SystMap<>::init(1.3));*/
 
- src.cp().process({"QCD"}).channel({"et","em","tt","mt"}).AddSyst(cb,
-      "CMS_htt_QCD_13TeV","lnN",SystMap<>::init(1.3));
-
   src.cp().process({"VV"}).AddSyst(cb,
       "CMS_htt_VVNorm_13TeV", "lnN", SystMap<>::init(1.15));
 
-  src.cp().process({"W"}).channel({"mt"}).AddSyst(cb,
-     "CMS_htt_WNorm_13TeV","lnN",SystMap<>::init(1.2));
 
 /*  src.cp()
       .AddSyst(cb,
@@ -160,5 +159,46 @@ void AddMSSMRun2Systematics(CombineHarvester & cb) {
 //  src.cp().process(ch::JoinStr({signal, {"ZTT"}}))
  //     .AddSyst(cb, "CMS_scale_t_mutau_$ERA", "shape", SystMap<>::init(1.00));
   //! [part6]
-}
+  if (control_region == 0) {
+    // we do not consider control regions
+    src.cp().process({"QCD"}).channel({"et","em","tt","mt"}).AddSyst(cb,
+        "CMS_htt_QCD_13TeV","lnN",SystMap<>::init(1.3));
+    src.cp().process({"W"}).channel({"mt"}).AddSyst(cb,
+        "CMS_htt_WNorm_13TeV","lnN",SystMap<>::init(1.2));
+    }
+  else if (control_region == 1) {
+      // setup rateParams
+      std::map<std::string,int> base_categories{{"btag",10},{"nobtag",13}};
+      for (auto bin:src.cp().bin_id({8,9}).bin_set()){
+        // use cb as we need all categories
+        // Add rateParam for W in OS
+        cb.cp().process({"W"}).channel({bin.substr(0,2)}).AddSyst(cb, "wjets_rate_"+bin+"_os","rateParam", SystMap<bin_id>::init({*(src.cp().bin({bin}).bin_id_set().begin()),base_categories[bin.substr(3)]},1.0));
+        // Add rateParam for W in SS
+        cb.cp().process({"W"}).channel({bin.substr(0,2)}).AddSyst(cb, "wjets_rate_"+bin+"_ss","rateParam", SystMap<bin_id>::init({base_categories[bin.substr(3)]+1,base_categories[bin.substr(3)]+2},1.0));
+        // Add rateParam for QCD
+        cb.cp().process({"QCD"}).channel({bin.substr(0,2)}).AddSyst(cb, "qcd_rate_"+bin,"rateParam", SystMap<bin_id>::init({*(src.cp().bin({bin}).bin_id_set().begin()),base_categories[bin.substr(3)]+1},1.0));
+      }
+    src.cp().process({"QCD"}).channel({"et","em","tt","mt"}).AddSyst(cb,
+        "CMS_htt_QCD_13TeV","lnN",SystMap<>::init(1.3));
+    src.cp().process({"W"}).channel({"mt"}).AddSyst(cb,
+        "CMS_htt_WNorm_13TeV","lnN",SystMap<>::init(1.2));
+  }
+  else if (control_region == 2) {
+      // setup rateParams
+      std::map<std::string,int> base_categories{{"btag",10},{"nobtag",13}};
+      for (auto bin:src.cp().bin_id({8,9}).bin_set()){
+        // Add rateParam for W in OS
+        src.cp().process({"W"}).channel({bin.substr(0,2)}).AddSyst(cb, "wjets_rate_"+bin+"_os","rateParam", SystMap<bin_id>::init({*(src.cp().bin({bin}).bin_id_set().begin()),base_categories[bin.substr(3)]},1.0));
+        // Add rateParam for W in SS
+        src.cp().process({"W"}).channel({bin.substr(0,2)}).AddSyst(cb, "wjets_rate_"+bin+"_ss","rateParam", SystMap<bin_id>::init({base_categories[bin.substr(3)]+1,base_categories[bin.substr(3)]+2},1.0));
+        // Add rateParam for QCD
+        src.cp().process({"QCD"}).channel({bin.substr(0,2)}).AddSyst(cb, "qcd_rate_"+bin,"rateParam", SystMap<bin_id>::init({*(src.cp().bin({bin}).bin_id_set().begin()),base_categories[bin.substr(3)]+1},1.0));
+      }
+      // add the systematic on W+Jets and QCD in the signal region
+      src.cp().process({"QCD"}).channel({"et","em","tt","mt"}).bin_id({8,9}).AddSyst(cb,
+          "CMS_htt_QCD_13TeV","lnN",SystMap<>::init(1.2));
+      src.cp().process({"W"}).channel({"mt"}).bin_id({8,9}).AddSyst(cb,
+          "CMS_htt_WNorm_13TeV","lnN",SystMap<>::init(1.1));
+    }
+  }
 }
