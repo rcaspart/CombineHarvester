@@ -26,6 +26,16 @@ using namespace std;
 using boost::starts_with;
 namespace po = boost::program_options;
 
+template <typename T>
+void To1Bin(T* proc)
+{
+    TH1F *hist = new TH1F("hist","hist",1,0,1);
+    hist->SetDirectory(0);
+    hist->SetBinContent(1,proc->ClonedScaledShape()->Integral(0,proc->ClonedScaledShape()->GetNbinsX()+1));
+    proc->set_shape(*hist,true);
+}
+
+
 int main(int argc, char** argv) {
   // First define the location of the "auxiliaries" directory where we can
   // source the input files containing the datacard shapes
@@ -61,7 +71,8 @@ int main(int argc, char** argv) {
   VString chns =
       //{"tt"};
    //   {"mt"};
-      {"mt","et","tt","em"};
+      //{"mt","et","tt","em"};
+      {"mt","et"};
 
   RooRealVar mA(mass.c_str(), mass.c_str(), 90., 3200.);
   RooRealVar mH("mH", "mH", 90., 3200.);
@@ -161,8 +172,7 @@ int main(int argc, char** argv) {
       cb.FilterAll([](ch::Object const* obj) {
               return (((obj->bin().find("wjetscr") != std::string::npos) && (obj->process() == "QCD")) || (boost::regex_search(obj->bin(),boost::regex{"(wjets|qcd)cr"}) && obj->signal()));
               });
-  }
-
+  } 
 
   ch::AddMSSMRun2Systematics(cb,control_region);
   //! [part7]
@@ -187,6 +197,8 @@ int main(int argc, char** argv) {
         obs->set_shape(cb.cp().bin({b}).backgrounds().GetShape(), true);
         });
     } 
+    cb.cp().FilterAll([](ch::Object const* obj) { return ! (boost::regex_search(obj->bin(),boost::regex{"(wjets|qcd)cr"}));}).ForEachProc(To1Bin<ch::Process>);
+    cb.cp().FilterAll([](ch::Object const* obj) { return ! (boost::regex_search(obj->bin(),boost::regex{"(wjets|qcd)cr"}));}).ForEachObs(To1Bin<ch::Observation>);
   
 
   auto rebin = ch::AutoRebin()
@@ -301,6 +313,7 @@ int main(int argc, char** argv) {
       }
   }
      
+  cb.PrintAll();
   cout << " done\n";
 
 

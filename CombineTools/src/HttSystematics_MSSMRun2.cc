@@ -18,6 +18,7 @@ using ch::JoinStr;
 
 void AddMSSMRun2Systematics(CombineHarvester & cb, int control_region = 0) {
   CombineHarvester src = cb.cp();
+  
   if (control_region == 1){
     //limit to only the btag and nobtag categories
     src.bin_id({8,9});
@@ -108,8 +109,8 @@ void AddMSSMRun2Systematics(CombineHarvester & cb, int control_region = 0) {
 /*  src.cp().process(ch::JoinStr({signal, {"ZTT"}})).channel({"em"})
       .AddSyst(cb, "CMS_scale_e_$ERA", "shape", SystMap<>::init(1.00));*/
 
-  src.cp().process(ch::JoinStr({signal, {"ZTT"}})).channel({"et","mt","tt"})
-      .AddSyst(cb, "CMS_scale_t_$CHANNEL_$ERA", "shape", SystMap<>::init(1.00));
+  //src.cp().process(ch::JoinStr({signal, {"ZTT"}})).channel({"et","mt","tt"})
+      //.AddSyst(cb, "CMS_scale_t_$CHANNEL_$ERA", "shape", SystMap<>::init(1.00));
 
 //  src.cp().channel({"em"}).process(ch::JoinStr({signal, {"TT","VV","ZLL","ZTT","W"}})).AddSyst(cb, "CMS_eff_m", "lnN", SystMap<>::init(1.02));
 
