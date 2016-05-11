@@ -1,8 +1,10 @@
 #include <map>
 #include "boost/program_options.hpp"
 #include "boost/format.hpp"
+#include "boost/bind.hpp"
 #include "TSystem.h"
 #include "TH2F.h"
+#include "CombineHarvester/CombineTools/interface/Utilities.h"
 #include "CombineHarvester/CombineTools/interface/CombineHarvester.h"
 #include "CombineHarvester/CombineTools/interface/ParseCombineWorkspace.h"
 #include "CombineHarvester/CombineTools/interface/TFileIO.h"
@@ -28,6 +30,7 @@ int main(int argc, char* argv[]) {
   std::string freeze_arg = "";
   bool covariance   = false;
   string data       = "data_obs";
+  bool make_yield_tables = false;
 
   po::options_description help_config("Help");
   help_config.add_options()
@@ -71,7 +74,10 @@ int main(int argc, char* argv[]) {
       "Format PARAM1,PARAM2=X,PARAM3=Y where the values X and Y are optional")
     ("covariance",
       po::value<bool>(&covariance)->default_value(covariance)->implicit_value(true),
-      "Save the covariance and correlation matrices of the process yields");
+      "Save the covariance and correlation matrices of the process yields")
+    ("make_yield_tables",
+      po::value<bool>(&make_yield_tables)->default_value(make_yield_tables)->implicit_value(true),
+      "Print yield tables in Latex format");
 
   if (sampling && !postfit) {
     throw logic_error(
@@ -153,7 +159,8 @@ int main(int argc, char* argv[]) {
     return no_shape;
   });
 
-  auto bins = cmb.bin_set();
+  cmb.ForEachObj(boost::bind(ch::SetFromBinName,_1,"$ANALYSIS_$CHANNEL_$BINID_$ERA"));
+  auto bins = cmb.cp().bin_set();
 
   TFile outfile(output.c_str(), "RECREATE");
   TH1::AddDirectory(false);
@@ -212,6 +219,99 @@ int main(int argc, char* argv[]) {
                   (rate > 0. ? (err / rate) : 0.);
     }
   }
+    map<string, map<string, std::pair<double,double>>> post_yields;
+    make_yield_tables=true;
+    if(make_yield_tables){
+      // Setting up some maps of labels we're going to need later
+      std::vector<string> chns = {"mt","et", "tt", "zmm"};
+      std::map<string,string> bkg_proc_labels;
+      std::map<string,string> header_labels;
+      bkg_proc_labels["ZTT"] = "$\\cPZ\\rightarrow \\Pgt\\Pgt$";
+      bkg_proc_labels["ZL"] = "$\\cPZ$+jets (l faking $\\Pgt$)";
+      bkg_proc_labels["ZJ"] = "$\\cPZ$+jets (jet faking $\\Pgt$)";
+      bkg_proc_labels["W"] = "$\\PW$+jets";
+      bkg_proc_labels["QCD"] = "QCD";
+      bkg_proc_labels["TT"] = "$\\cPqt\\cPaqt$";
+      bkg_proc_labels["TTJ"] = "$\\cPqt\\cPaqt$ (jet)";
+      bkg_proc_labels["TTT"] = "$\\cPqt\\cPaqt$ (l)";
+      bkg_proc_labels["VV"] = "Di-bosons + single top";
+      bkg_proc_labels["VVT"] = "Di-bosons (jet)";
+      bkg_proc_labels["VVJ"] = "Di-bosons (l)";
+      bkg_proc_labels["ZLL"] = "$\\cPZ\\rightarrow \\ell\\ell$";
+      header_labels["et"] = "$e\\tau_h$-channel";
+      header_labels["mt"] = "$\\mu\\tau_h$-channel";
+      header_labels["em"] = "$e\\mu$-channel";
+      header_labels["tt"] = "$\\tau_h\\tau_h$-channel";
+      for (string chn : chns){
+        auto chn_bins = cmb.cp().channel({chn}).bin_id({8,9}).bin_set(); //MSSM analysis specific!
+        unsigned ncols = chn_bins.size();
+        cout << "\\begin{tabular}{l";
+        for (unsigned i = 0; i < ncols; ++i) cout << "r@{$ \\,\\,\\pm\\,\\, $}l";
+        cout << "}\n\\hline\n";
+        cout << boost::format("\\multicolumn{%i}{c}{%s} \\\\\n") %
+              (ncols * 2 + 1) % header_labels[chn];
+        cout << "\\hline\n";
+        std::string cm_energy = "13~\\TeV";
+        std::cout << boost::format("& \\multicolumn{%i}{c}{$\\sqrt{s}$ = %s} ") %
+                     (ncols * 2) % cm_energy;
+        cout << "\\\\\n";
+        cout << "Process";
+        for (auto bin : chn_bins){
+          std::string bin_label = "";
+          if (bin.find("_8_") != std::string::npos) bin_label = "No b-tag";
+          else bin_label = "B-tag";
+          cout << " & \\multicolumn{2}{c}{" + bin_label + "}";
+        }
+        cout << "\\\\\n";
+        cout << "\\hline\n";
+        string fmt = "& %-10.0f & %-10.0f";
+        string fmts = "& %-10.0f & %-10.1f";
+        ch::CombineHarvester chn_bin;
+        //Fill the yield maps:
+        for (auto bin : chn_bins) {
+          chn_bin = cmb.cp().bin({bin});
+          auto chn_bkgs = chn_bin.cp().backgrounds();
+          auto chn_sig = chn_bin.cp().signals();
+          post_yields[bin]["data_obs"] = std::make_pair(chn_bin.GetObservedRate(),0.);
+          double tot_unc = chn_bkgs.GetUncertainty();
+          post_yields[bin]["TotalBkg"] = std::make_pair(chn_bkgs.GetRate(),tot_unc);
+          double sig_unc = chn_sig.GetUncertainty();
+          post_yields[bin]["TotalSignal"] = std::make_pair(chn_sig.GetRate(),sig_unc);
+          for (auto proc : chn_bkgs.process_set()) {
+            auto chn_proc = chn_bin.cp().process({proc});
+            double proc_unc = chn_proc.GetUncertainty() ;
+            post_yields[bin][proc] = std::make_pair(chn_proc.GetRate(), proc_unc);
+          }
+        }
+        //Now we have to reorder the nested bin/process loops to print the tables:
+        auto chn_bkgs = chn_bin.cp().backgrounds();
+        for (auto proc : chn_bkgs.process_set()) {
+         cout << boost::format("%-38s") % bkg_proc_labels[proc];
+         for (auto bin : chn_bins){ 
+          cout << boost::format(post_yields[bin][proc].second < 1. ? fmts : fmt) %
+                    post_yields[bin][proc].first % post_yields[bin][proc].second;
+         }
+         cout << "\\\\\n";
+       }
+       cout << "\\hline\n";
+       cout << boost::format("%-38s") % "Total Background";
+       for (auto bin : chn_bins)
+         cout << boost::format(fmt) % post_yields[bin]["TotalBkg"].first % post_yields[bin]["TotalBkg"].second;
+       cout << "\\\\\n";
+       cout << "\\hline\n";
+       cout << boost::format("%-38s") % "A/H$\\rightarrow\\Pgt\\Pgt$";
+       for (auto bin : chn_bins)
+         cout << boost::format(fmt) % post_yields[bin]["TotalSignal"].first % post_yields[bin]["TotalSignal"].second;
+       cout << "\\\\\n";
+       cout << "\\hline\n";
+       cout << boost::format("%-38s") % "Data";
+       for (auto bin : chn_bins)
+         cout << boost::format("& \\multicolumn{2}{c}{%-10.0f}") % (post_yields[bin]["data_obs"]).first;
+       cout << "\\\\\n";
+       cout << "\\hline\n";
+       cout << "\\end{tabular}\n";
+      }
+    }
 
   // Now we can do the same again but for the post-fit model
   if (postfit) {
@@ -301,6 +401,94 @@ int main(int argc, char* argv[]) {
       for (auto & iter : post_yield_cor) {
         ch::WriteToTFile(&(iter.second), &outfile,
                          iter.first+"_cor");
+      }
+    }
+    make_yield_tables=true;
+    if(make_yield_tables){
+      // Setting up some maps of labels we're going to need later
+      std::vector<string> chns = {"mt","et","tt","em"};
+      std::map<string,string> bkg_proc_labels;
+      std::map<string,string> header_labels;
+      bkg_proc_labels["ZTT"] = "$\\cPZ\\rightarrow \\Pgt\\Pgt$";
+      bkg_proc_labels["ZL"] = "$\\cPZ$+jets (l faking $\\Pgt$)";
+      bkg_proc_labels["ZJ"] = "$\\cPZ$+jets (jet faking $\\Pgt$)";
+      bkg_proc_labels["W"] = "$\\PW$+jets";
+      bkg_proc_labels["QCD"] = "QCD";
+      bkg_proc_labels["TT"] = "$\\cPqt\\cPaqt$";
+      bkg_proc_labels["VV"] = "Di-bosons + single top";
+      bkg_proc_labels["ZLL"] = "$\\cPZ\\rightarrow \\ell\\ell$";
+      header_labels["et"] = "$e\\tau_h$-channel";
+      header_labels["mt"] = "$\\mu\\tau_h$-channel";
+      header_labels["em"] = "$e\\mu$-channel";
+      header_labels["tt"] = "$\\tau_h\\tau_h$-channel";
+      for (string chn : chns){
+        auto chn_bins = cmb.cp().channel({chn}).bin_id({8,9}).bin_set(); //MSSM analysis specific!
+        unsigned ncols = chn_bins.size();
+        cout << "\\begin{tabular}{l";
+        for (unsigned i = 0; i < ncols; ++i) cout << "r@{$ \\,\\,\\pm\\,\\, $}l";
+        cout << "}\n\\hline\n";
+        cout << boost::format("\\multicolumn{%i}{c}{%s} \\\\\n") %
+              (ncols * 2 + 1) % header_labels[chn];
+        cout << "\\hline\n";
+        std::string cm_energy = "13~\\TeV";
+        std::cout << boost::format("& \\multicolumn{%i}{c}{$\\sqrt{s}$ = %s} ") %
+                     (ncols * 2) % cm_energy;
+        cout << "\\\\\n";
+        cout << "Process";
+        for (auto bin : chn_bins){
+          std::string bin_label = "";
+          if (bin.find("_8_") != std::string::npos) bin_label = "No b-tag";
+          else bin_label = "B-tag";
+          cout << " & \\multicolumn{2}{c}{" + bin_label + "}";
+        }
+        cout << "\\\\\n";
+        cout << "\\hline\n";
+        string fmt = "& %-10.0f & %-10.0f";
+        string fmts = "& %-10.0f & %-10.1f";
+        ch::CombineHarvester chn_bin;
+        //Fill the yield maps:
+        for (auto bin : chn_bins) {
+          chn_bin = cmb.cp().bin({bin});
+          auto chn_bkgs = chn_bin.cp().backgrounds();
+          auto chn_sig = chn_bin.cp().signals();
+          post_yields[bin]["data_obs"] = std::make_pair(chn_bin.GetObservedRate(),0.);
+          double tot_unc = sampling ? chn_bkgs.GetUncertainty(res, samples) : chn_bkgs.GetUncertainty();
+          post_yields[bin]["TotalBkg"] = std::make_pair(chn_bkgs.GetRate(),tot_unc);
+          double sig_unc = sampling ? chn_sig.GetUncertainty(res, samples) : chn_sig.GetUncertainty();
+          post_yields[bin]["TotalSignal"] = std::make_pair(chn_sig.GetRate(),sig_unc);
+          for (auto proc : chn_bkgs.process_set()) {
+            auto chn_proc = chn_bin.cp().process({proc});
+            double proc_unc = sampling ? chn_proc.GetUncertainty(res, samples) : chn_proc.GetUncertainty() ;
+            post_yields[bin][proc] = std::make_pair(chn_proc.GetRate(), proc_unc);
+          }
+        }
+        //Now we have to reorder the nested bin/process loops to print the tables:
+        auto chn_bkgs = chn_bin.cp().backgrounds();
+        for (auto proc : chn_bkgs.process_set()) {
+         cout << boost::format("%-38s") % bkg_proc_labels[proc];
+         for (auto bin : chn_bins){ 
+          cout << boost::format(post_yields[bin][proc].second < 1. ? fmts : fmt) %
+                    post_yields[bin][proc].first % post_yields[bin][proc].second;
+         }
+         cout << "\\\\\n";
+       }
+       cout << "\\hline\n";
+       cout << boost::format("%-38s") % "Total Background";
+       for (auto bin : chn_bins)
+         cout << boost::format(fmt) % post_yields[bin]["TotalBkg"].first % post_yields[bin]["TotalBkg"].second;
+       cout << "\\\\\n";
+       cout << "\\hline\n";
+       cout << boost::format("%-38s") % "A/H\\$\\rightarrow\\Pgt\\Pgt$";
+       for (auto bin : chn_bins)
+         cout << boost::format(fmt) % post_yields[bin]["TotalSignal"].first % post_yields[bin]["TotalSignal"].second;
+       cout << "\\\\\n";
+       cout << "\\hline\n";
+       cout << boost::format("%-38s") % "Data";
+       for (auto bin : chn_bins)
+         cout << boost::format("& \\multicolumn{2}{c}{%-10.0f}") % (post_yields[bin]["data_obs"]).first;
+       cout << "\\\\\n";
+       cout << "\\hline\n";
+       cout << "\\end{tabular}\n";
       }
     }
   }
