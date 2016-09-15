@@ -105,11 +105,14 @@ int main(int argc, char** argv) {
   input_dir["mt"]  = string(getenv("CMSSW_BASE")) + "/src/CombineHarvester/MSSM2016/shapes/"+input_folder_mt+"/";
   input_dir["et"]  = string(getenv("CMSSW_BASE")) + "/src/CombineHarvester/MSSM2016/shapes/"+input_folder_et+"/";
   input_dir["tt"]  = string(getenv("CMSSW_BASE")) + "/src/CombineHarvester/MSSM2016/shapes/"+input_folder_tt+"/";
+  input_dir["zmm"]  = string(getenv("CMSSW_BASE")) + "/src/CombineHarvester/MSSM2016/shapes/KIT/";
 
   VString chns =
-  //    {"tt"};
- //     {"mt"};
-      {"mt","et","tt","em"};
+      //{"tt"};
+      //{"mt"};
+      //{"mt","et"};
+      //{"mt","et","tt","em","zmm"};
+      {"mt","et","tt","em","zmm"};
 
   RooRealVar mA(mass.c_str(), mass.c_str(), 90., 3200.);
   mA.setConstant(true);
@@ -118,9 +121,10 @@ int main(int argc, char** argv) {
 
   map<string, VString> bkg_procs;
   bkg_procs["et"] = {"W", "QCD", "ZL", "ZJ", "TTT","TTJ", "VVT","VVJ","ZTT"};
-  bkg_procs["mt"] = {"W", "QCD", "ZL", "ZJ", "TTT","TTJ" "VVT","VVJ","ZTT"};
+  bkg_procs["mt"] = {"W", "QCD", "ZL", "ZJ", "TTT","TTJ", "VVT","VVJ","ZTT"};
   bkg_procs["tt"] = {"W", "QCD", "ZL", "ZJ", "TTT","TTJ", "VVT","VVJ","ZTT"};
   bkg_procs["em"] = {"W", "QCD", "ZLL", "TT", "VV", "ZTT"};
+  bkg_procs["zmm"] = {"W", "QCD", "ZLL", "TT", "VV", "ZTT"};
 
   VString SM_procs = {"ggH_SM125", "qqH_SM125", "ZH_SM125", "WminusH_SM125","WplusH_SM125"};
 
@@ -135,6 +139,8 @@ int main(int argc, char** argv) {
   binning["tt_btag"] = {500,3900};
   binning["em_nobtag"] = {500,3900};
   binning["em_btag"] = {500,3900};
+  binning["zmm_nobtag"] = {500,700,900,1300,1700,1900,3900};
+  binning["zmm_btag"] = {500,1300,3900};
 
   // Create an empty CombineHarvester instance that will hold all of the
   // datacard configuration and histograms etc.
@@ -166,12 +172,17 @@ int main(int argc, char** argv) {
     {9, "mt_btag"}
     };
 
+  cats["zmm_13TeV"] = {
+    {8, "zmm_nobtag"},
+    {9, "zmm_btag"}
+    };
+
   if (control_region > 0){
       // for each channel use the categories >= 10 for the control regions
       // the control regions are ordered in triples (10,11,12),(13,14,15)...
       for (auto chn : chns){
         // for em or tt do nothing
-        if (ch::contains({"em", "tt"}, chn)) {
+        if (ch::contains({"em", "tt", "zmm"}, chn)) {
           std::cout << " - Skipping extra control regions for channel " << chn << "\n";
           continue;
         }
@@ -188,7 +199,8 @@ int main(int argc, char** argv) {
       }
   }
 
-  vector<string> masses = {"90","100","110","120","130","140","160","180", "200", "250", "300", "350", "400", "450", "500", "600", "700", "800", "900","1000","1200","1400","1500","1600","1800","2000","2300","2600","2900","3200"};
+  //vector<string> masses = {"90","120","130","180","450","700","1000","1200","2900"};
+  vector<string> masses = {"90","110","120","130","180", "300", "400", "450", "700", "900","1200","1400","1500","1600","1800","2000","2300","2600","2900"};
 
   map<string, VString> signal_types = {
     {"ggH", {"ggh_htautau", "ggH_Htautau", "ggA_Atautau"}},
@@ -218,6 +230,11 @@ int main(int argc, char** argv) {
               return (BinIsControlRegion(obj) && obj->signal());
               });
   }
+
+  // we do need to filter signal in the zmm region
+  cb.FilterAll([](ch::Object const* obj) {
+      return (obj->channel() == std::string("zmm") && obj->signal());
+  });
 
 
 
